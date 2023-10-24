@@ -16,7 +16,7 @@ import { joinPath } from 'vs/base/common/resources';
 import { URI } from 'vs/base/common/uri';
 import { Promises } from 'vs/base/node/pfs';
 import { flakySuite, getPathFromAmdModule, getRandomTestPath } from 'vs/base/test/node/testUtils';
-import { etag, IFileAtomicReadOptions, FileOperation, FileOperationError, FileOperationEvent, FileOperationResult, FilePermission, FileSystemProviderCapabilities, hasFileAtomicReadCapability, hasOpenReadWriteCloseCapability, IFileStat, IFileStatWithMetadata, IReadFileOptions, IStat, NotModifiedSinceFileOperationError } from 'vs/platform/files/common/files';
+import { etag, IFileAtomicReadOptions, FileOperation, FileOperationError, FileOperationEvent, FileOperationResult, FilePermission, FileSystemProviderCapabilities, hasFileAtomicReadCapability, hasOpenReadWriteCloseCapability, IFileStat, IFileStatWithMetadata, IReadFileOptions, IStat, NotModifiedSinceFileOperationError, TooLargeFileOperationError } from 'vs/platform/files/common/files';
 import { FileService } from 'vs/platform/files/common/fileService';
 import { DiskFileSystemProvider } from 'vs/platform/files/node/diskFileSystemProvider';
 import { NullLogService } from 'vs/platform/log/common/log';
@@ -142,8 +142,6 @@ flakySuite('Disk File Service', function () {
 	const disposables = new DisposableStore();
 
 	setup(async () => {
-		DiskFileSystemProvider.configureFlushOnWrite(true); // but enable flushing for the purpose of these tests
-
 		const logService = new NullLogService();
 
 		service = new FileService(logService);
@@ -164,14 +162,10 @@ flakySuite('Disk File Service', function () {
 		await Promises.copy(sourceDir, testDir, { preserveSymlinks: false });
 	});
 
-	teardown(async () => {
-		try {
-			disposables.clear();
+	teardown(() => {
+		disposables.clear();
 
-			await Promises.rm(testDir);
-		} finally {
-			DiskFileSystemProvider.configureFlushOnWrite(false);
-		}
+		return Promises.rm(testDir);
 	});
 
 	test('createFolder', async () => {
@@ -1649,14 +1643,14 @@ flakySuite('Disk File Service', function () {
 	});
 
 	async function testFileExceedsMemoryLimit() {
-		await doTestFileExceedsMemoryLimit();
+		await doTestFileExceedsMemoryLimit(false);
 
 		// Also test when the stat size is wrong
 		fileProvider.setSmallStatSize(true);
-		return doTestFileExceedsMemoryLimit();
+		return doTestFileExceedsMemoryLimit(true);
 	}
 
-	async function doTestFileExceedsMemoryLimit() {
+	async function doTestFileExceedsMemoryLimit(statSizeWrong: boolean) {
 		const resource = URI.file(join(testDir, 'index.html'));
 
 		let error: FileOperationError | undefined = undefined;
@@ -1667,6 +1661,10 @@ flakySuite('Disk File Service', function () {
 		}
 
 		assert.ok(error);
+		if (!statSizeWrong) {
+			assert.ok(error instanceof TooLargeFileOperationError);
+			assert.ok(typeof error.size === 'number');
+		}
 		assert.strictEqual(error!.fileOperationResult, FileOperationResult.FILE_EXCEEDS_MEMORY_LIMIT);
 	}
 
@@ -1693,14 +1691,14 @@ flakySuite('Disk File Service', function () {
 	});
 
 	async function testFileTooLarge() {
-		await doTestFileTooLarge();
+		await doTestFileTooLarge(false);
 
 		// Also test when the stat size is wrong
 		fileProvider.setSmallStatSize(true);
-		return doTestFileTooLarge();
+		return doTestFileTooLarge(true);
 	}
 
-	async function doTestFileTooLarge() {
+	async function doTestFileTooLarge(statSizeWrong: boolean) {
 		const resource = URI.file(join(testDir, 'index.html'));
 
 		let error: FileOperationError | undefined = undefined;
@@ -1710,7 +1708,10 @@ flakySuite('Disk File Service', function () {
 			error = err;
 		}
 
-		assert.ok(error);
+		if (!statSizeWrong) {
+			assert.ok(error instanceof TooLargeFileOperationError);
+			assert.ok(typeof error.size === 'number');
+		}
 		assert.strictEqual(error!.fileOperationResult, FileOperationResult.FILE_TOO_LARGE);
 	}
 
@@ -1800,6 +1801,15 @@ flakySuite('Disk File Service', function () {
 
 	test('writeFile - default', async () => {
 		return testWriteFile();
+	});
+
+	test('writeFile - flush on write', async () => {
+		DiskFileSystemProvider.configureFlushOnWrite(true);
+		try {
+			return await testWriteFile();
+		} finally {
+			DiskFileSystemProvider.configureFlushOnWrite(false);
+		}
 	});
 
 	test('writeFile - buffered', async () => {

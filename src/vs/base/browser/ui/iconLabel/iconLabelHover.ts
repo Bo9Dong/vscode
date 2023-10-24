@@ -30,14 +30,14 @@ export function setupNativeHover(htmlElement: HTMLElement, tooltip: string | ITo
 	}
 }
 
-export type IHoverContent = string | ITooltipMarkdownString | HTMLElement | undefined;
+type IHoverContent = string | ITooltipMarkdownString | HTMLElement | undefined;
 type IResolvedHoverContent = IMarkdownString | string | HTMLElement | undefined;
 
 /**
  * Copied from src\vs\workbench\services\hover\browser\hover.ts
  * @deprecated Use IHoverService
  */
-export interface IHoverAction {
+interface IHoverAction {
 	label: string;
 	commandId: string;
 	iconClass?: string;
@@ -201,16 +201,6 @@ export function setupCustomHover(hoverDelegate: IHoverDelegate, htmlElement: HTM
 			targetElements: [htmlElement],
 			dispose: () => { }
 		};
-		if (hoverDelegate.placement === undefined || hoverDelegate.placement === 'mouse') {
-			// track the mouse position
-			const onMouseMove = (e: MouseEvent) => {
-				target.x = e.x + 10;
-				if ((e.target instanceof HTMLElement) && e.target.classList.contains('action-label')) {
-					hideHover(true, true);
-				}
-			};
-			toDispose.add(dom.addDisposableListener(htmlElement, dom.EventType.MOUSE_MOVE, onMouseMove, true));
-		}
 		toDispose.add(triggerShowHover(hoverDelegate.delay, false, target));
 
 		hoverPreparation = toDispose;
